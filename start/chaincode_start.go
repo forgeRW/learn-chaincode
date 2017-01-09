@@ -30,6 +30,11 @@ type SimpleChaincode struct {
 // ============================================================================================================================
 // Main
 // ============================================================================================================================
+/*
+The main function that execute when each peer deploys their instance of the
+chaincode. It just calls shim.Start(), which sets up the communication between
+this chaincode and the peer that deployed it.
+*/
 func main() {
 	err := shim.Start(new(SimpleChaincode))
 	if err != nil {
@@ -37,29 +42,42 @@ func main() {
 	}
 }
 
-// Init resets all the things
+// Init resets all the things. Init is called when you first deploy your
+// chaincode. In this case, the function interprets the first argument sent in
+// the deployment request as the value to be stored under the key 'hello_world'
+// in the ledger.
 func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("Incorrect number of arguments. Expecting 1")
 	}
 
+	err := stub.PutState("hello_world", []byte(args[0]))
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
-// Invoke is our entry point to invoke a chaincode function
+// Invoke is our entry point to invoke a chaincode function. Invoke is called
+// when you want to call chaincode functions to do real work. In this case,
+// Invoke function calls a generic write function.
 func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	fmt.Println("invoke is running " + function)
 
 	// Handle different functions
 	if function == "init" {													//initialize the chaincode state, used as reset
 		return t.Init(stub, "init", args)
+	} else if function == "write" {
+		return t.write(stub, args);
 	}
 	fmt.Println("invoke did not find func: " + function)					//error
 
 	return nil, errors.New("Received unknown function invocation: " + function)
 }
 
-// Query is our entry point for queries
+// Query is our entry point for queries. Query is called whenever you query your
+// chaincode's state. Queries do not result in blocks being added to the chain.
+// In this case, Query function calls a generic read function.
 func (t *SimpleChaincode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	fmt.Println("query is running " + function)
 
@@ -67,8 +85,56 @@ func (t *SimpleChaincode) Query(stub shim.ChaincodeStubInterface, function strin
 	if function == "dummy_query" {											//read a variable
 		fmt.Println("hi there " + function)						//error
 		return nil, nil;
+	} else if function == "read" {
+		return t.read(stub, args)
 	}
 	fmt.Println("query did not find func: " + function)						//error
 
 	return nil, errors.New("Received unknown function query: " + function)
+}
+
+// write function allows you to store any key/value pair you want into the
+// blockchain ledger
+func (t *SimpleChaincode) write(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+  var key, value string
+  var err error
+  fmt.Println("running write()")
+
+  if len(args) != 2 {
+      return nil, errors.New("Incorrect number of arguments. Expecting 2. name of the key and value to set")
+  }
+
+  key = args[0]                            //rename for fun
+  value = args[1]
+  err = stub.PutState(key, []byte(value))  //write the variable into the chaincode state
+  if err != nil {
+      return nil, err
+  }
+  return nil, nil
+}
+
+/*
+This read function is using the complement to PutState called GetState.
+While PutState allows you to set a key/value pair, GetState lets you read the
+value for a previously written key. You can see that the single argument used by
+this function is taken as the key for the value that should be retrieved. Next,
+this function returns the value as an array of bytes back to Query, who in turn
+sends it back to the REST handler.
+*/
+func (t *SimpleChaincode) read(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var key, jsonResp string
+    var err error
+
+    if len(args) != 1 {
+        return nil, errors.New("Incorrect number of arguments. Expecting name of the key to query")
+    }
+
+    key = args[0]
+    valAsbytes, err := stub.GetState(key)
+    if err != nil {
+        jsonResp = "{\"Error\":\"Failed to get state for " + key + "\"}"
+        return nil, errors.New(jsonResp)
+    }
+
+    return valAsbytes, nil
 }
